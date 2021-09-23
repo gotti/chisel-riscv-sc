@@ -91,20 +91,20 @@ class Cpu extends Module {
   val alu_control :: alu_isneg :: aluin2_control :: rwb_isenable :: rwb_control :: Nil = control
 
   val memory_access_control = ListLookup(inst,
-    List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_0, READ_MEM_E_DISABLE),
+    List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_0, LOAD_E_DISABLE),
     Array(
-      LB -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_1, READ_MEM_E_ENABLE),
-      LBU -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_1, READ_MEM_E_DISABLE),
-      LH -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_2, READ_MEM_E_ENABLE),
-      LHU -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_2, READ_MEM_E_DISABLE),
-      LW -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_4, READ_MEM_E_DISABLE),
-      SB -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_1, READ_MEM_E_DISABLE),
-      SH -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_2, READ_MEM_E_DISABLE),
-      SW -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_4, READ_MEM_E_DISABLE),
+      LB -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_1, LOAD_E_ENABLE),
+      LBU -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_1, LOAD_E_DISABLE),
+      LH -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_2, LOAD_E_ENABLE),
+      LHU -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_2, LOAD_E_DISABLE),
+      LW -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_4, LOAD_E_DISABLE),
+      SB -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_1, LOAD_E_DISABLE),
+      SH -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_2, LOAD_E_DISABLE),
+      SW -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_4, LOAD_E_DISABLE),
       )
     )
 
-  val datamem_we :: datamem_byteenable :: Nil = memory_access_control
+  val datamem_we :: datamem_byteenable :: datamem_signextend :: Nil = memory_access_control
 
   val branch_control = ListLookup(inst,
     List(IS_NOT_BRANCH, BRANCH_DIRECT, BRANCH_MODE_EQ),
@@ -211,7 +211,7 @@ class Cpu extends Module {
     (rwb_control === RWB_ALU) -> alu_out,
     (rwb_control === RWB_PC) -> (pc+4.U(WORD_LEN.W)),
     (rwb_control === RWB_CSR) -> csr_data,
-    (rwb_control === RWB_MEM) -> dataMem_e,
+    (rwb_control === RWB_MEM) -> Mux(datamem_signextend===LOAD_E_ENABLE, dataMem_e, io.DataMem.ReadData),
   ))
   io.regIo.rd_writeControl := rwb_isenable
 
