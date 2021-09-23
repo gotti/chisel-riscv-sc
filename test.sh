@@ -6,7 +6,7 @@ for file in $files; do
   all=$(($all+1))
   ./riscv64-unknown-elf-objcopy -O binary $file ./tmp
   od -An -tx1 -w1 -v ./tmp > out
-  sbt test &> /dev/null; output=$?
+  sbt "testOnly main.RiscvTest" &> /dev/null; output=$?
   if [ $output -eq 0 ]; then
     echo "$file Success!!"
     success=$(($success+1))
