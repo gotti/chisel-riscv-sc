@@ -197,11 +197,19 @@ class Cpu extends Module {
     ))
   pc := next_pc
 
+  val dataMem_e = MuxCase(0.U(WORD_LEN.W), Seq(
+    (datamem_byteenable === DATAMEM_BYTEENABLE_0) -> 0.U(32.U),
+    (datamem_byteenable === DATAMEM_BYTEENABLE_1) -> Cat(Fill(24, io.DataMem.ReadData(7)), io.DataMem.ReadData(7,0)),
+    (datamem_byteenable === DATAMEM_BYTEENABLE_2) -> Cat(Fill(16, io.DataMem.ReadData(15)), io.DataMem.ReadData(15,0)),
+    (datamem_byteenable === DATAMEM_BYTEENABLE_4) -> io.DataMem.ReadData,
+    )
+  )
+
   register_writeback_data := MuxCase(0.U(WORD_LEN.W), Seq(
     (rwb_control === RWB_ALU) -> alu_out,
     (rwb_control === RWB_PC) -> (pc+4.U(WORD_LEN.W)),
     (rwb_control === RWB_CSR) -> csr_data,
-    (rwb_control === RWB_MEM) -> io.DataMem.ReadData,
+    (rwb_control === RWB_MEM) -> dataMem_e,
   ))
   io.regIo.rd_writeControl := rwb_isenable
 
@@ -230,10 +238,5 @@ class Cpu extends Module {
   printf(p"is_branch  : $is_branch\n")
   printf(p"branch_inv : $branch_isinv\n")
   printf(p"branch_ok  : $is_branch_ok\n")
-  printf(p"csr_raddr  : ${io.csrIo.csr_read_address}\n")
-  printf(p"csr_rdata  : $csr_data\n")
-  printf(p"csr_waddr  : ${io.csrIo.csr_write_address}\n")
-  printf(p"csr_wdata  : ${io.csrIo.csr_write_value}\n")
-  printf(p"csr_WE     : ${io.csrIo.csr_write_enable}\n")
   printf("---------\n")
 }
