@@ -4,7 +4,7 @@ success=0
 all=0
 for file in $files; do
   all=$(($all+1))
-  ./riscv64-unknown-linux-gnu-objcopy --output-format=binary $file ./tmp
+  ./riscv64-unknown-elf-objcopy -O binary $file ./tmp
   od -An -tx1 -w1 -v ./tmp > out
   sbt test &> /dev/null; output=$?
   if [ $output -eq 0 ]; then
