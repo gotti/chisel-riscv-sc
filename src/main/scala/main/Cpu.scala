@@ -10,13 +10,17 @@ import consts._
 class Cpu extends Module {
   var io = IO(new Bundle {
     var Memory = Flipped(new MemoryIo())
+    var ShadowStack = Flipped(new ShadowStackIo())
     var regIo = Flipped(new RegisterIo())
     val csrIo = Flipped(new CsrRegisterIo())
+    val pc_is_0x44 = Output(Bool())
+    val shadowstack_is_not_met = Output(Bool())
     val exit = Output(Bool())
   })
 
   val pc = RegInit(0.U(WORD_LEN.W))
   io.Memory.InstAddr := pc
+  io.pc_is_0x44 := pc===0x44.U
   val inst = io.Memory.InstData
 
   val rs1_address = inst(19, 15)
@@ -191,10 +195,16 @@ class Cpu extends Module {
     (branch_mode === BRANCH_MODE_POS) -> (Mux(branch_isinv===BRANCH_DIRECT, alu_out(0), !alu_out(0))),
   ))
 
+
+  val shadowstack_push_enable = ((inst===JALR || inst===JAL) && (rd_address === 1.U))
+  val shadowstack_pop_enable = ((inst===JALR) && (rd_address===0.U && rs1_address===1.U && imm_i===0.U))
+
   val pc_plus4 = pc+4.U
+  val jalr_pc = ((rs1_data+imm_i_e) & ~1.U(WORD_LEN.W))
   val next_pc = MuxCase(pc_plus4, Seq(
+      (pc === 0x999.U) -> 0x999.U(WORD_LEN.W),
       (inst === JAL) -> (pc+imm_j_e),
-      (inst === JALR) -> ((rs1_data+imm_i_e) & ~1.U(WORD_LEN.W)),
+      (inst === JALR) -> jalr_pc,
       (is_branch === IS_BRANCH) -> (Mux(is_branch_ok===1.U,branch_target, pc_plus4)),
       (is_ecall === IS_ECALL) -> (csr_data),
     ))
@@ -222,7 +232,15 @@ class Cpu extends Module {
   io.Memory.byte_enable := datamem_byteenable
   io.Memory.write_enable := datamem_we
 
-  io.exit := (pc === 0x44.U(WORD_LEN.W))
+
+  io.ShadowStack.push_enable := shadowstack_push_enable
+  io.ShadowStack.pop_enable := shadowstack_pop_enable
+  io.ShadowStack.writeData := pc+4.U
+
+  val halt_flag = (inst === JALR && shadowstack_pop_enable && !(io.ShadowStack.readData === jalr_pc))
+  io.shadowstack_is_not_met := halt_flag
+
+  io.exit := (inst===HALT || halt_flag)
   printf(p"io.pc      : 0x${Hexadecimal(pc)}\n")
   printf(p"inst       : 0x${Hexadecimal(inst)}\n")
   printf(p"rs1_addr   : $rs1_address\n")
