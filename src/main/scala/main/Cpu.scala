@@ -1,0 +1,239 @@
+package main
+
+import chisel3._
+import chisel3.util._
+import chisel3.util.experimental.loadMemoryFromFile
+import consts.Consts._
+import consts.Instructions._
+import consts._
+
+class Cpu extends Module {
+  var io = IO(new Bundle {
+    var InstMem = Flipped(new InstMemIo())
+    var DataMem = Flipped(new DataMemIo())
+    var regIo = Flipped(new RegisterIo())
+    val csrIo = Flipped(new CsrRegisterIo())
+    val exit = Output(Bool())
+  })
+
+  val pc = RegInit(0.U(WORD_LEN.W))
+  io.InstMem.Addr := pc
+  val inst = io.InstMem.Inst
+
+  val rs1_address = inst(19, 15)
+  val rs2_address = inst(24, 20)
+  val rd_address = inst(11,7)
+  io.regIo.rs1_address := rs1_address
+  io.regIo.rs2_address := rs2_address
+  io.regIo.rd_address := rd_address
+  val register_writeback_data = Wire(UInt(WORD_LEN.W))
+  io.regIo.rd_writeback := register_writeback_data
+
+  var is_ecall = Mux(inst===ECALL, IS_ECALL, IS_NOT_ECALL)
+
+  io.csrIo.csr_read_address := Mux( is_ecall===IS_ECALL, consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W), inst(31,20))
+  io.csrIo.csr_write_address := Mux( is_ecall===IS_ECALL, consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W), inst(31,20))
+  //val csr_writeback_value = Wire(UInt(WORD_LEN.W))
+  //io.csrIo.csr_write_value := csr_writeback_value
+
+
+  val csr_data = Wire(UInt(CSR_DATA_LEN.W))
+  csr_data := io.csrIo.csr_read_value
+
+  val rs1_data = io.regIo.rs1_value
+  val rs2_data = io.regIo.rs2_value
+
+  val control = ListLookup(inst,
+    List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_ALU),
+    Array(
+      ADD -> List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      SUB -> List(ALU_ADDSUB, ALU_NEG, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      ADDI -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
+      AND -> List(ALU_AND, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      ANDI -> List(ALU_AND, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
+      XOR -> List(ALU_XOR, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      XORI -> List(ALU_XOR, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
+      OR -> List(ALU_OR, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      ORI -> List(ALU_OR, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
+      SLL -> List(ALU_SLL, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      SLLI -> List(ALU_SLL, ALU_POS, ALUIN2_SHAMT, RWB_ENABLE, RWB_ALU),
+      LUI -> List(ALU_PASS2, ALU_POS, ALUIN2_IMM_U, RWB_ENABLE, RWB_ALU),
+      LB -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_MEM),
+      LH -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_MEM),
+      LW -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_MEM),
+      SB -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_S, RWB_DISABLE, RWB_ALU),
+      SH -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_S, RWB_DISABLE, RWB_ALU),
+      SW -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_S, RWB_DISABLE, RWB_ALU),
+      SLT -> List(ALU_SLTI, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      SLTI -> List(ALU_SLTI, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
+      SLTU -> List(ALU_SLTIU, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      SLTIU -> List(ALU_SLTIU, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
+      SRL -> List(ALU_SRL, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      SRLI -> List(ALU_SRL, ALU_POS, ALUIN2_SHAMT, RWB_ENABLE, RWB_ALU),
+      SRA -> List(ALU_SRL, ALU_NEG, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
+      SRAI -> List(ALU_SRL, ALU_NEG, ALUIN2_SHAMT, RWB_ENABLE, RWB_ALU), //shamt[5]==1のときなぞ
+      BEQ -> List(ALU_ADDSUB, ALU_NEG, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+      BNE -> List(ALU_ADDSUB, ALU_NEG, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+      BLT -> List(ALU_SLTI, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+      BGE -> List(ALU_SLTI, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+      BLTU -> List(ALU_SLTIU, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+      BGEU -> List(ALU_SLTIU, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+      AUIPC -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_U, RWB_ENABLE, RWB_ALU),
+      CSRRS -> List(ALU_OR, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
+      CSRRW -> List(ALU_PASS1, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
+      CSRRWI -> List(ALU_PASS1, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
+      JAL -> List(ALU_PASS1, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_PC),
+      JALR -> List(ALU_PASS1, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_PC),
+      )
+    )
+
+
+  val alu_control :: alu_isneg :: aluin2_control :: rwb_isenable :: rwb_control :: Nil = control
+
+  val memory_access_control = ListLookup(inst,
+    List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_0),
+    Array(
+      LB -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_1),
+      LH -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_2),
+      LW -> List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_4),
+      SB -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_1),
+      SH -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_2),
+      SW -> List(DATAMEM_WE_ENABLE, DATAMEM_BYTEENABLE_4),
+      )
+    )
+
+  val datamem_we :: datamem_byteenable :: Nil = memory_access_control
+
+  val branch_control = ListLookup(inst,
+    List(IS_NOT_BRANCH, BRANCH_DIRECT, BRANCH_MODE_EQ),
+    Array(
+      BEQ -> List(IS_BRANCH, BRANCH_DIRECT, BRANCH_MODE_EQ),
+      BNE -> List(IS_BRANCH, BRANCH_INVERSE, BRANCH_MODE_EQ),
+      BLT -> List(IS_BRANCH, BRANCH_DIRECT, BRANCH_MODE_POS),
+      BGE -> List(IS_BRANCH, BRANCH_INVERSE, BRANCH_MODE_POS),
+      BLTU -> List(IS_BRANCH, BRANCH_DIRECT, BRANCH_MODE_POS),
+      BGEU -> List(IS_BRANCH, BRANCH_INVERSE, BRANCH_MODE_POS),
+    )
+  )
+
+  val is_branch :: branch_isinv :: branch_mode :: Nil = branch_control
+
+  val imm_i = inst(31, 20)
+  val imm_i_e = Cat(Fill(20, imm_i(11)), imm_i)
+  val imm_s = Cat(inst(31, 25), inst(11, 7))
+  val imm_s_e = Cat(Fill(20, imm_s(11)), imm_s)
+  val imm_b = Cat(inst(31), inst(7), inst(30, 25), inst(11, 8))
+  val imm_b_e = Cat(Fill(19, imm_b(11)), imm_b, 0.U(1.U))
+  val imm_j = Cat(inst(31), inst(19, 12), inst(20), inst(30, 21))
+  val imm_j_e = Cat(Fill(11, imm_j(19)), imm_j, 0.U(1.U))
+  val imm_u = inst(31,12)
+  val imm_u_shifted = Cat(imm_u, Fill(12, 0.U))
+  val imm_z = inst(19,15)
+  val imm_z_uext = Cat(Fill(27, 0.U), imm_z)
+
+  val imm_shamt = inst(25,20)
+
+  val csr_control = ListLookup(inst,
+    List(ALUIN1_SELECT_RS1, CSR_WB_DISABLE),
+    Array(
+      AUIPC -> List(ALUIN1_SELECT_PC, CSR_WB_DISABLE),
+      CSRRS -> List(ALUIN1_SELECT_IMMZ, CSR_WB_ENABLE),
+      CSRRW -> List(ALUIN1_SELECT_RS1, CSR_WB_ENABLE),
+      CSRRWI -> List(ALUIN1_SELECT_IMMZ, CSR_WB_ENABLE),
+      ECALL -> List(ALUIN1_SELECT_RS1, CSR_WB_ENABLE),
+    ))
+
+  val aluin1_select :: csr_wb_isenable :: Nil = csr_control
+  val aluin1 = MuxCase(0.U(WORD_LEN.W), Seq(
+    (aluin1_select === ALUIN1_SELECT_RS1) -> rs1_data,
+    (aluin1_select === ALUIN1_SELECT_IMMZ) -> imm_z_uext,
+    (aluin1_select === ALUIN1_SELECT_PC) -> pc,
+    ))
+
+  val aluin2 = MuxCase(0.U(WORD_LEN.W), Seq(
+    (aluin2_control === ALUIN2_REG) -> rs2_data,
+    (aluin2_control === ALUIN2_IMM_I) -> imm_i_e,
+    (aluin2_control === ALUIN2_IMM_S) -> imm_s_e,
+    (aluin2_control === ALUIN2_IMM_J) -> imm_j_e,
+    (aluin2_control === ALUIN2_IMM_U) -> imm_u_shifted,
+    (aluin2_control === ALUIN2_CSR) -> csr_data,
+    (aluin2_control === ALUIN2_SHAMT) -> imm_shamt,
+    ))
+
+  val alu_out = Wire(UInt(WORD_LEN.W))
+
+  alu_out := MuxCase(0.U(WORD_LEN.W), Seq(
+    (alu_control === ALU_ADDSUB) -> (Mux(alu_isneg===ALU_POS,  aluin1+aluin2 , aluin1-aluin2 )),
+    (alu_control === ALU_SLL) -> (aluin1<<aluin2(4,0)),
+    (alu_control === ALU_SLTI) -> (aluin1.asSInt()<aluin2.asSInt()).asUInt(),
+    (alu_control === ALU_SLTIU) -> (aluin1 < aluin2).asUInt(),
+    (alu_control === ALU_XOR) -> (aluin1 ^ aluin2),
+    (alu_control === ALU_SRL) -> (Mux(alu_isneg===ALU_POS, (aluin1 >> aluin2(4,0)).asUInt(), ((aluin1).asSInt() >> aluin2).asUInt() )),
+    (alu_control === ALU_OR) -> (aluin1 | aluin2),
+    (alu_control === ALU_AND) -> (aluin1 & aluin2),
+    (alu_control === ALU_PASS1) -> (aluin1),
+    (alu_control === ALU_PASS2) -> (aluin2),
+    ))
+
+  io.csrIo.csr_write_value := Mux(is_ecall===IS_ECALL, 11.U(CSR_DATA_LEN.W) , alu_out) //hardcoded machine level...
+
+  io.csrIo.csr_write_enable := csr_wb_isenable //TODO: This is not recommended
+
+  val branch_target = Wire(UInt(WORD_LEN.W))
+  branch_target := pc + imm_b_e
+
+  val is_branch_ok = Wire(Bool())
+  is_branch_ok := MuxCase(false.B, Seq(
+    (branch_mode === BRANCH_MODE_EQ) -> (Mux(branch_isinv===BRANCH_DIRECT, (alu_out===0.U(WORD_LEN.W)), !(alu_out===0.U(WORD_LEN.W)))),
+    (branch_mode === BRANCH_MODE_POS) -> (Mux(branch_isinv===BRANCH_DIRECT, alu_out(0), !alu_out(0))),
+  ))
+
+  val pc_plus4 = pc+4.U
+  val next_pc = MuxCase(pc_plus4, Seq(
+      (inst === JAL) -> (pc+imm_j_e),
+      (inst === JALR) -> ((rs2_data+imm_i_e) & ~1.U(WORD_LEN.W)),
+      (is_branch === IS_BRANCH) -> (Mux(is_branch_ok===1.U,branch_target, pc_plus4)),
+      (is_ecall === IS_ECALL) -> (csr_data),
+    ))
+  pc := next_pc
+
+  register_writeback_data := MuxCase(0.U(WORD_LEN.W), Seq(
+    (rwb_control === RWB_ALU) -> alu_out,
+    (rwb_control === RWB_PC) -> (pc+4.U(WORD_LEN.W)),
+    (rwb_control === RWB_CSR) -> csr_data,
+    (rwb_control === RWB_MEM) -> io.DataMem.ReadData,
+  ))
+  io.regIo.rd_writeControl := rwb_isenable
+
+  io.DataMem.ReadAddr := alu_out
+  io.DataMem.WriteAddr := alu_out
+  io.DataMem.WriteData := rs2_data
+  io.DataMem.byte_enable := datamem_byteenable
+  io.DataMem.write_enable := datamem_we
+
+  io.exit := (pc === 0x44.U(WORD_LEN.W))
+  printf(p"io.pc      : 0x${Hexadecimal(pc)}\n")
+  printf(p"inst       : 0x${Hexadecimal(inst)}\n")
+  printf(p"rs1_addr   : $rs1_address\n")
+  printf(p"rs2_addr   : $rs2_address\n")
+  printf(p"wb_addr    : $rd_address\n")
+  printf(p"rs1_data   : 0x${Hexadecimal(rs1_data)}\n")
+  printf(p"rs2_data   : 0x${Hexadecimal(rs2_data)}\n")
+  printf(p"aluin1     : 0x${Hexadecimal(aluin1)}\n")
+  printf(p"aluin2     : 0x${Hexadecimal(aluin2)}\n")
+  printf(p"alu_out    : ${alu_out}\n")
+  printf(p"imm_i      : 0x${Hexadecimal(imm_i_e)}\n")
+  printf(p"alu_isneg  : $alu_isneg\n")
+  printf(p"alucontrol : $alu_control\n")
+  printf(p"wb_data    : 0x${Hexadecimal(register_writeback_data)}\n")
+  printf(p"branch_mode: $branch_mode\n")
+  printf(p"is_branch  : $is_branch\n")
+  printf(p"branch_inv : $branch_isinv\n")
+  printf(p"branch_ok  : $is_branch_ok\n")
+  printf(p"csr_raddr  : ${io.csrIo.csr_read_address}\n")
+  printf(p"csr_rdata  : $csr_data\n")
+  printf(p"csr_waddr  : ${io.csrIo.csr_write_address}\n")
+  printf(p"csr_wdata  : ${io.csrIo.csr_write_value}\n")
+  printf(p"csr_WE     : ${io.csrIo.csr_write_enable}\n")
+  printf("---------\n")
+}
