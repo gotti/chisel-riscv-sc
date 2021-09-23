@@ -42,17 +42,17 @@ class DataMem extends Module {
   val dataMem = Mem(16384, UInt(8.W))
 
   io.dataMem.ReadData := Cat(
-    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4, dataMem(io.dataMem.ReadAddr + 3.U(WORD_LEN.W)), 0.U),
-    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4, dataMem(io.dataMem.ReadAddr + 2.U(WORD_LEN.W)), 0.U),
-    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_2, dataMem(io.dataMem.ReadAddr + 1.U(WORD_LEN.W)), 0.U),
-    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_1, dataMem(io.dataMem.ReadAddr), 0.U),
+    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4, dataMem(io.dataMem.ReadAddr + 3.U(WORD_LEN.W))(7,0), 0.U(8.W)),
+    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4, dataMem(io.dataMem.ReadAddr + 2.U(WORD_LEN.W))(7,0), 0.U(8.W)),
+    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_2, dataMem(io.dataMem.ReadAddr + 1.U(WORD_LEN.W))(7,0), 0.U(8.W)),
+    Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_1, dataMem(io.dataMem.ReadAddr                  )(7,0), 0.U(8.W)),
   )
   when (io.dataMem.write_enable===DATAMEM_WE_ENABLE){
     when (io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_1){
       dataMem(io.dataMem.WriteAddr) := io.dataMem.WriteData(7, 0)
     }
     when (io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_2){
-      dataMem(io.dataMem.WriteAddr) := io.dataMem.WriteData(15, 8)
+      dataMem(io.dataMem.WriteAddr + 1.U(WORD_LEN.W)) := io.dataMem.WriteData(15, 8)
     }
     when (io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4){
       dataMem(io.dataMem.WriteAddr + 2.U(WORD_LEN.W)) := io.dataMem.WriteData(23, 16)
