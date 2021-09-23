@@ -9,16 +9,15 @@ import consts._
 
 class Cpu extends Module {
   var io = IO(new Bundle {
-    var InstMem = Flipped(new InstMemIo())
-    var DataMem = Flipped(new DataMemIo())
+    var Memory = Flipped(new MemoryIo())
     var regIo = Flipped(new RegisterIo())
     val csrIo = Flipped(new CsrRegisterIo())
     val exit = Output(Bool())
   })
 
   val pc = RegInit(0.U(WORD_LEN.W))
-  io.InstMem.Addr := pc
-  val inst = io.InstMem.Inst
+  io.Memory.InstAddr := pc
+  val inst = io.Memory.InstData
 
   val rs1_address = inst(19, 15)
   val rs2_address = inst(24, 20)
@@ -195,7 +194,7 @@ class Cpu extends Module {
   val pc_plus4 = pc+4.U
   val next_pc = MuxCase(pc_plus4, Seq(
       (inst === JAL) -> (pc+imm_j_e),
-      (inst === JALR) -> ((rs2_data+imm_i_e) & ~1.U(WORD_LEN.W)),
+      (inst === JALR) -> ((rs1_data+imm_i_e) & ~1.U(WORD_LEN.W)),
       (is_branch === IS_BRANCH) -> (Mux(is_branch_ok===1.U,branch_target, pc_plus4)),
       (is_ecall === IS_ECALL) -> (csr_data),
     ))
@@ -203,9 +202,9 @@ class Cpu extends Module {
 
   val dataMem_e = MuxCase(0.U(WORD_LEN.W), Seq(
     (datamem_byteenable === DATAMEM_BYTEENABLE_0) -> 0.U(32.U),
-    (datamem_byteenable === DATAMEM_BYTEENABLE_1) -> Cat(Fill(24, io.DataMem.ReadData(7)), io.DataMem.ReadData(7,0)),
-    (datamem_byteenable === DATAMEM_BYTEENABLE_2) -> Cat(Fill(16, io.DataMem.ReadData(15)), io.DataMem.ReadData(15,0)),
-    (datamem_byteenable === DATAMEM_BYTEENABLE_4) -> io.DataMem.ReadData,
+    (datamem_byteenable === DATAMEM_BYTEENABLE_1) -> Cat(Fill(24, io.Memory.ReadData(7)), io.Memory.ReadData(7,0)),
+    (datamem_byteenable === DATAMEM_BYTEENABLE_2) -> Cat(Fill(16, io.Memory.ReadData(15)), io.Memory.ReadData(15,0)),
+    (datamem_byteenable === DATAMEM_BYTEENABLE_4) -> io.Memory.ReadData,
     )
   )
 
@@ -213,15 +212,15 @@ class Cpu extends Module {
     (rwb_control === RWB_ALU) -> alu_out,
     (rwb_control === RWB_PC) -> (pc+4.U(WORD_LEN.W)),
     (rwb_control === RWB_CSR) -> csr_data,
-    (rwb_control === RWB_MEM) -> Mux(datamem_signextend===LOAD_E_ENABLE, dataMem_e, io.DataMem.ReadData),
+    (rwb_control === RWB_MEM) -> Mux(datamem_signextend===LOAD_E_ENABLE, dataMem_e, io.Memory.ReadData),
   ))
   io.regIo.rd_writeControl := rwb_isenable
 
-  io.DataMem.ReadAddr := alu_out
-  io.DataMem.WriteAddr := alu_out
-  io.DataMem.WriteData := rs2_data
-  io.DataMem.byte_enable := datamem_byteenable
-  io.DataMem.write_enable := datamem_we
+  io.Memory.ReadAddr := alu_out
+  io.Memory.WriteAddr := alu_out
+  io.Memory.WriteData := rs2_data
+  io.Memory.byte_enable := datamem_byteenable
+  io.Memory.write_enable := datamem_we
 
   io.exit := (pc === 0x44.U(WORD_LEN.W))
   printf(p"io.pc      : 0x${Hexadecimal(pc)}\n")

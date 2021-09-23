@@ -13,10 +13,8 @@ class Top extends Module{
 
   val cpu = Module(new Cpu())
   val register = Module(new Register())
-  val instructionMemory = Module(new InstMem())
-  val dataMemory = Module(new DataMem())
-  cpu.io.InstMem <> instructionMemory.io.instMem
-  cpu.io.DataMem <> dataMemory.io.dataMem
+  val memory = Module(new Memory())
+  cpu.io.Memory <> memory.io.Memory
   cpu.io.regIo <> register.io.regIo
   cpu.io.csrIo <> register.io.csrIo
   cpu.io.exit <> io.exit
