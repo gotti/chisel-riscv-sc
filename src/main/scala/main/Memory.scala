@@ -40,7 +40,7 @@ class DataMem extends Module {
   })
 
   val dataMem = Mem(16384, UInt(8.W))
-
+  loadMemoryFromFile(dataMem, "./out")
   io.dataMem.ReadData := Cat(
     Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4, dataMem(io.dataMem.ReadAddr + 3.U(WORD_LEN.W))(7,0), 0.U(8.W)),
     Mux(io.dataMem.byte_enable >= DATAMEM_BYTEENABLE_4, dataMem(io.dataMem.ReadAddr + 2.U(WORD_LEN.W))(7,0), 0.U(8.W)),
