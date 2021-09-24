@@ -19,6 +19,7 @@ class Cpu extends Module {
   })
 
   val pc = RegInit(0.U(WORD_LEN.W))
+  val privilege_level = RegInit(3.U(2.W))
   io.Memory.InstAddr := pc
   io.pc_is_0x44 := pc===0x44.U
   val inst = io.Memory.InstData
@@ -34,8 +35,14 @@ class Cpu extends Module {
 
   var is_ecall = Mux(inst===ECALL, IS_ECALL, IS_NOT_ECALL)
 
+  val shadowstack_not_met = Wire(Bool())
+
   io.csrIo.csr_read_address := Mux( is_ecall===IS_ECALL, consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W), inst(31,20))
-  io.csrIo.csr_write_address := Mux( is_ecall===IS_ECALL, consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W), inst(31,20))
+  io.csrIo.csr_write_address := MuxCase( inst(31,20),
+    Array(
+      (is_ecall===IS_ECALL) -> consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W),
+    ),
+  )
   //val csr_writeback_value = Wire(UInt(WORD_LEN.W))
   //io.csrIo.csr_write_value := csr_writeback_value
 
@@ -182,9 +189,14 @@ class Cpu extends Module {
     (alu_control === ALU_PASS2) -> (aluin2),
     ))
 
-  io.csrIo.csr_write_value := Mux(is_ecall===IS_ECALL, 11.U(CSR_DATA_LEN.W) , alu_out) //hardcoded machine level...
+  io.csrIo.csr_write_value := MuxCase(alu_out, 
+    Array(
+      (is_ecall===IS_ECALL) -> privilege_level,
+      (shadowstack_not_met) -> 0x103.U,
+    )
+  )
 
-  io.csrIo.csr_write_enable := csr_wb_isenable //TODO: This is not recommended
+  io.csrIo.csr_write_enable := (csr_wb_isenable | shadowstack_not_met)
 
   val branch_target = Wire(UInt(WORD_LEN.W))
   branch_target := pc + imm_b_e
@@ -237,10 +249,10 @@ class Cpu extends Module {
   io.ShadowStack.pop_enable := shadowstack_pop_enable
   io.ShadowStack.writeData := pc+4.U
 
-  val halt_flag = (inst === JALR && shadowstack_pop_enable && !(io.ShadowStack.readData === jalr_pc))
-  io.shadowstack_is_not_met := halt_flag
+  shadowstack_not_met := (inst === JALR && shadowstack_pop_enable && !(io.ShadowStack.readData === jalr_pc))
+  io.shadowstack_is_not_met := shadowstack_not_met
 
-  io.exit := (inst===HALT || halt_flag)
+  io.exit := (inst===HALT || shadowstack_not_met)
   printf(p"io.pc      : 0x${Hexadecimal(pc)}\n")
   printf(p"inst       : 0x${Hexadecimal(inst)}\n")
   printf(p"rs1_addr   : $rs1_address\n")
