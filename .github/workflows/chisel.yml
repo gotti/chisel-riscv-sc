@@ -35,4 +35,7 @@ jobs:
       run: sbt "runMain main.VerilogMain"
     - name: Run riscv-tests
       run: |
-        bash ./test.sh
+        bash ./test-riscv.sh
+    - name: Run shadowstack test
+      run: |
+        bash ./test-shadowstack.sh
