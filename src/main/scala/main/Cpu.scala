@@ -98,7 +98,10 @@ class Cpu extends Module {
       AUIPC -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_U, RWB_ENABLE, RWB_ALU),
       CSRRS -> List(ALU_OR, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
       CSRRW -> List(ALU_PASS1, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
+      CSRRC -> List(ALU_AND, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
       CSRRWI -> List(ALU_PASS1, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
+      CSRRCI -> List(ALU_AND, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
+      CSRRSI -> List(ALU_OR, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
       JAL -> List(ALU_PASS1, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_PC),
       JALR -> List(ALU_PASS1, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_PC),
       )
@@ -149,23 +152,45 @@ class Cpu extends Module {
   val imm_u_shifted = Cat(imm_u, Fill(12, 0.U))
   val imm_z = inst(19,15)
   val imm_z_uext = Cat(Fill(27, 0.U), imm_z)
+  val imm_z_uext_f = ~imm_z_uext
 
   val imm_shamt = inst(25,20)
+
+  val csr_mask = MuxCase( 0.U(WORD_LEN.W),
+    Array(
+      (inst===CSRRW) -> rs1_data,
+      (inst===CSRRC) -> rs1_data,
+      (inst===CSRRS) -> rs1_data,
+      (inst===CSRRWI) -> imm_z_uext,
+      (inst===CSRRCI) -> imm_z_uext,
+      (inst===CSRRSI) -> imm_z_uext,
+      )
+    )
+
+  val csr_mask_f = MuxCase(csr_mask,
+    Array(
+      (inst===CSRRC) -> ~csr_mask,
+      (inst===CSRRCI) -> ~csr_mask,
+      )
+    )
 
   val csr_control = ListLookup(inst,
     List(ALUIN1_SELECT_RS1, CSR_WB_DISABLE),
     Array(
       AUIPC -> List(ALUIN1_SELECT_PC, CSR_WB_DISABLE),
-      CSRRS -> List(ALUIN1_SELECT_IMMZ, CSR_WB_ENABLE),
-      CSRRW -> List(ALUIN1_SELECT_RS1, CSR_WB_ENABLE),
-      CSRRWI -> List(ALUIN1_SELECT_IMMZ, CSR_WB_ENABLE),
+      CSRRW -> List(ALUIN1_SELECT_CSRMASK, CSR_WB_ENABLE),
+      CSRRS -> List(ALUIN1_SELECT_CSRMASK, CSR_WB_ENABLE),
+      CSRRC -> List(ALUIN1_SELECT_CSRMASK, CSR_WB_ENABLE),
+      CSRRWI -> List(ALUIN1_SELECT_CSRMASK, CSR_WB_ENABLE),
+      CSRRCI -> List(ALUIN1_SELECT_CSRMASK, CSR_WB_ENABLE),
+      CSRRSI -> List(ALUIN1_SELECT_CSRMASK, CSR_WB_ENABLE),
       ECALL -> List(ALUIN1_SELECT_RS1, CSR_WB_ENABLE),
     ))
 
   val aluin1_select :: csr_wb_isenable :: Nil = csr_control
   val aluin1 = MuxCase(0.U(WORD_LEN.W), Seq(
     (aluin1_select === ALUIN1_SELECT_RS1) -> rs1_data,
-    (aluin1_select === ALUIN1_SELECT_IMMZ) -> imm_z_uext,
+    (aluin1_select === ALUIN1_SELECT_CSRMASK) -> csr_mask_f,
     (aluin1_select === ALUIN1_SELECT_PC) -> pc,
     ))
 
