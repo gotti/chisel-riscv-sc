@@ -191,7 +191,7 @@ class Cpu extends Module {
 
   io.csrIo.csr_write_value := MuxCase(alu_out, 
     Array(
-      (is_ecall===IS_ECALL) -> privilege_level,
+      (is_ecall===IS_ECALL) -> 11.U,
       (shadowstack_not_met) -> 0x103.U,
     )
   )
