@@ -23,7 +23,7 @@ class ShadowStackTest extends FlatSpec with ChiselScalatestTester {
       while (!c.io.exit.peek().litToBoolean){
         c.clock.step(1)
       }
-      c.io.shadowstack_is_not_met.expect(false.B)
+      c.io.gp.expect(1.U)
     }
   }
 }

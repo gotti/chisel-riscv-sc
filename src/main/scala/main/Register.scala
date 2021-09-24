@@ -64,4 +64,6 @@ class Register extends Module{
   printf(p"CSR_WE=${io.csrIo.csr_write_enable}\n")
   printf(p"CSR_wa=${io.csrIo.csr_write_address}\n")
   printf(p"CSR_wv=${io.csrIo.csr_write_value}\n")
+  printf(p"CSR_ra=${io.csrIo.csr_read_address}\n")
+  printf(p"CSR_rv=${io.csrIo.csr_read_value}\n")
 }

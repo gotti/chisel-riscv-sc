@@ -14,7 +14,6 @@ class Cpu extends Module {
     var regIo = Flipped(new RegisterIo())
     val csrIo = Flipped(new CsrRegisterIo())
     val pc_is_0x44 = Output(Bool())
-    val shadowstack_is_not_met = Output(Bool())
     val exit = Output(Bool())
   })
 
@@ -37,10 +36,16 @@ class Cpu extends Module {
 
   val shadowstack_not_met = Wire(Bool())
 
-  io.csrIo.csr_read_address := Mux( is_ecall===IS_ECALL, consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W), inst(31,20))
+  io.csrIo.csr_read_address := MuxCase( inst(31,20),
+    Array(
+      (is_ecall===IS_ECALL) -> consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W),
+      (shadowstack_not_met) -> consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W),
+    )
+  )
   io.csrIo.csr_write_address := MuxCase( inst(31,20),
     Array(
       (is_ecall===IS_ECALL) -> consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W),
+      (shadowstack_not_met) -> consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W),
     ),
   )
   //val csr_writeback_value = Wire(UInt(WORD_LEN.W))
@@ -54,7 +59,7 @@ class Cpu extends Module {
   val rs2_data = io.regIo.rs2_value
 
   val control = ListLookup(inst,
-    List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_ALU),
+    List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
     Array(
       ADD -> List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
       SUB -> List(ALU_ADDSUB, ALU_NEG, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
@@ -214,6 +219,7 @@ class Cpu extends Module {
   val pc_plus4 = pc+4.U
   val jalr_pc = ((rs1_data+imm_i_e) & ~1.U(WORD_LEN.W))
   val next_pc = MuxCase(pc_plus4, Seq(
+      (shadowstack_not_met) -> (csr_data),
       (pc === 0x999.U) -> 0x999.U(WORD_LEN.W),
       (inst === JAL) -> (pc+imm_j_e),
       (inst === JALR) -> jalr_pc,
@@ -250,14 +256,14 @@ class Cpu extends Module {
   io.ShadowStack.writeData := pc+4.U
 
   shadowstack_not_met := (inst === JALR && shadowstack_pop_enable && !(io.ShadowStack.readData === jalr_pc))
-  io.shadowstack_is_not_met := shadowstack_not_met
 
-  io.exit := (inst===HALT || shadowstack_not_met)
+  io.exit := (inst===HALT)
   printf(p"io.pc      : 0x${Hexadecimal(pc)}\n")
   printf(p"inst       : 0x${Hexadecimal(inst)}\n")
   printf(p"rs1_addr   : $rs1_address\n")
   printf(p"rs2_addr   : $rs2_address\n")
   printf(p"wb_addr    : $rd_address\n")
+  printf(p"writeback_c: $rwb_control\n")
   printf(p"rs1_data   : 0x${Hexadecimal(rs1_data)}\n")
   printf(p"rs2_data   : 0x${Hexadecimal(rs2_data)}\n")
   printf(p"aluin1     : 0x${Hexadecimal(aluin1)}\n")
@@ -271,5 +277,6 @@ class Cpu extends Module {
   printf(p"is_branch  : $is_branch\n")
   printf(p"branch_inv : $branch_isinv\n")
   printf(p"branch_ok  : $is_branch_ok\n")
+  printf(p"ss_not_met : $shadowstack_not_met\n")
   printf("---------\n")
 }
