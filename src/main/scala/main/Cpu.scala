@@ -36,16 +36,16 @@ class Cpu extends Module {
 
   val shadowstack_not_met = Wire(Bool())
 
+  val exception_flag = Wire(Bool())
+
   io.csrIo.csr_read_address := MuxCase( inst(31,20),
     Array(
-      (is_ecall===IS_ECALL) -> consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W),
-      (shadowstack_not_met) -> consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W),
+      (exception_flag) -> consts.CSRs.mtvec.U(CSR_ADDRESS_LEN.W),
     )
   )
   io.csrIo.csr_write_address := MuxCase( inst(31,20),
     Array(
-      (is_ecall===IS_ECALL) -> consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W),
-      (shadowstack_not_met) -> consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W),
+      (exception_flag) -> consts.CSRs.mcause.U(CSR_ADDRESS_LEN.W),
     ),
   )
   //val csr_writeback_value = Wire(UInt(WORD_LEN.W))
@@ -59,8 +59,11 @@ class Cpu extends Module {
   val rs2_data = io.regIo.rs2_value
 
   val control = ListLookup(inst,
-    List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
+    List(ALU_ILLEGAL, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
     Array(
+      MRET -> List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_NONE), //MRET is nop...
+      FENCE -> List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_NONE), //FENCE is nop...
+      FENCE_I -> List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_NONE), //FENCE_I is nop...
       ADD -> List(ALU_ADDSUB, ALU_POS, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
       SUB -> List(ALU_ADDSUB, ALU_NEG, ALUIN2_REG, RWB_ENABLE, RWB_ALU),
       ADDI -> List(ALU_ADDSUB, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_ALU),
@@ -104,11 +107,19 @@ class Cpu extends Module {
       CSRRSI -> List(ALU_OR, ALU_POS, ALUIN2_CSR, RWB_ENABLE, RWB_CSR),
       JAL -> List(ALU_PASS1, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_PC),
       JALR -> List(ALU_PASS1, ALU_POS, ALUIN2_IMM_I, RWB_ENABLE, RWB_PC),
+      ECALL -> List(ALU_EXCEPTION, ALU_POS, ALUIN2_REG, RWB_DISABLE, RWB_NONE),
       )
     )
 
-
   val alu_control :: alu_isneg :: aluin2_control :: rwb_isenable :: rwb_control :: Nil = control
+
+  exception_flag := MuxCase( false.B,
+    Array(
+      (alu_control===ALU_EXCEPTION) -> true.B,
+      (alu_control===ALU_ILLEGAL) -> true.B,
+      (shadowstack_not_met) -> true.B,
+      )
+    )
 
   val memory_access_control = ListLookup(inst,
     List(DATAMEM_WE_DISABLE, DATAMEM_BYTEENABLE_0, LOAD_E_DISABLE),
@@ -221,12 +232,13 @@ class Cpu extends Module {
 
   io.csrIo.csr_write_value := MuxCase(alu_out, 
     Array(
+      (alu_control===ALU_ILLEGAL) -> "h80000000".U,
       (is_ecall===IS_ECALL) -> 11.U,
       (shadowstack_not_met) -> 0x103.U,
     )
   )
 
-  io.csrIo.csr_write_enable := (csr_wb_isenable | shadowstack_not_met)
+  io.csrIo.csr_write_enable := (csr_wb_isenable | exception_flag)
 
   val branch_target = Wire(UInt(WORD_LEN.W))
   branch_target := pc + imm_b_e
@@ -244,12 +256,11 @@ class Cpu extends Module {
   val pc_plus4 = pc+4.U
   val jalr_pc = ((rs1_data+imm_i_e) & ~1.U(WORD_LEN.W))
   val next_pc = MuxCase(pc_plus4, Seq(
-      (shadowstack_not_met) -> (csr_data),
+      (exception_flag) -> (csr_data),
       (pc === 0x999.U) -> 0x999.U(WORD_LEN.W),
       (inst === JAL) -> (pc+imm_j_e),
       (inst === JALR) -> jalr_pc,
       (is_branch === IS_BRANCH) -> (Mux(is_branch_ok===1.U,branch_target, pc_plus4)),
-      (is_ecall === IS_ECALL) -> (csr_data),
     ))
   pc := next_pc
 
